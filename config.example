@@ -1,0 +1,29 @@
+# voice-memos configuration
+# Copy to ~/.config/voice-memos/config and edit as needed.
+# All settings have sensible defaults — you only need to set OUTPUT_DIR.
+
+# --- Required ----------------------------------------------------------------
+
+# Directory where transcripts are saved. One file per day: YYYY-MM-DD.md
+# Example: your Obsidian daily notes folder, a Logseq journal, or any directory.
+OUTPUT_DIR="$HOME/Notes"
+
+# --- Optional ----------------------------------------------------------------
+
+# Tag prepended to each transcript line (set to "" to disable)
+OUTPUT_TAG="#voice-memo"
+
+# Include timestamp (HH:MM:SS) in output line (true/false)
+OUTPUT_TIMESTAMP=true
+
+# Include recording duration in output line (true/false)
+OUTPUT_DURATION=true
+
+# Whisper language — "auto" to detect, or a language code (en, es, ru, etc.)
+LANGUAGE="auto"
+
+# Whisper model path (downloaded by install.sh)
+WHISPER_MODEL="$HOME/.local/share/whisper-cpp/models/ggml-large-v3-turbo-q5_0.bin"
+
+# Whisper command path
+WHISPER_CMD="/opt/homebrew/bin/whisper-cli"
