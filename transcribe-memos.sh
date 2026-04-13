@@ -3,8 +3,8 @@
 # voice-memos — Auto-transcribe Apple Voice Memos
 #
 # Watches for new Voice Memos (recorded on iPhone, Apple Watch, or Mac),
-# transcribes them locally using whisper.cpp, and appends the text to a
-# dated file in your notes directory.
+# transcribes them locally using whisper.cpp, and appends the text to
+# the current weekly note under "## Notes & Captures".
 #
 # Usage:
 #   ./transcribe-memos.sh           # Process new memos once and exit
@@ -20,7 +20,7 @@ set -euo pipefail
 MEMOS_DIR="$HOME/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings"
 
 # Defaults (overridden by config file)
-OUTPUT_DIR="$HOME/Notes"
+OUTPUT_DIR="$HOME/Brain/Calendar/Weekly"
 OUTPUT_TAG="#voice-memo"
 OUTPUT_TIMESTAMP=true
 OUTPUT_DURATION=true
@@ -183,21 +183,31 @@ recording_date() {
     echo "${datetime%% *}"
 }
 
-# Ensure a daily note file exists for the given date
-ensure_daily_note() {
-    local date="$1"
-    local note_path="$OUTPUT_DIR/$date.md"
+# Compute the weekly note filename (e.g. W15-2026) from a YYYY-MM-DD date
+recording_week() {
+    local ymd="$1"
+    date -jf '%Y-%m-%d' "$ymd" '+W%V-%G'
+}
+
+# Resolve the weekly note path for a given date. The note must already exist
+# (created by Obsidian); returns empty string and logs a warning if missing.
+resolve_weekly_note() {
+    local ymd="$1"
+    local week_name
+    week_name=$(recording_week "$ymd")
+    local note_path="$OUTPUT_DIR/${week_name}.md"
 
     if [[ ! -f "$note_path" ]]; then
-        log "Creating note for $date"
-        echo "# $date" > "$note_path"
-        echo "" >> "$note_path"
+        log "WARNING: Weekly note not found: $note_path"
+        echo ""
+        return 1
     fi
 
     echo "$note_path"
 }
 
-# Append a transcript to the daily note
+# Append a transcript under "## Notes & Captures" in the weekly note.
+# Inserts before the next ## heading so other sections aren't displaced.
 append_transcript() {
     local note_path="$1"
     local time="$2"
@@ -215,10 +225,37 @@ append_transcript() {
     [[ "$OUTPUT_DURATION" == "true" ]] && line="${line}${duration} / "
     line="${line}${oneline}"
 
-    {
-        echo ""
-        echo "$line"
-    } >> "$note_path"
+    # Find the "## Notes & Captures" section and insert before the next ## heading
+    local section_line next_heading_line total_lines
+    section_line=$(grep -n '^## Notes & Captures' "$note_path" | head -1 | cut -d: -f1)
+
+    if [[ -z "$section_line" ]]; then
+        log "WARNING: '## Notes & Captures' not found in $note_path — appending to end"
+        printf '\n%s\n' "$line" >> "$note_path"
+        return
+    fi
+
+    total_lines=$(wc -l < "$note_path")
+
+    # Find the next ## heading after the section header
+    next_heading_line=$(tail -n +"$((section_line + 1))" "$note_path" \
+        | grep -n '^## ' | head -1 | cut -d: -f1)
+
+    if [[ -n "$next_heading_line" ]]; then
+        # Convert relative line number to absolute
+        local insert_at=$(( section_line + next_heading_line ))
+        # Split file and reassemble with the new line inserted
+        # (safer than sed -i with arbitrary transcript text)
+        local tmp="$TMP_DIR/_weekly_note_insert.md"
+        { head -n "$((insert_at - 1))" "$note_path"
+          printf '%s\n\n' "$line"
+          tail -n +"$insert_at" "$note_path"
+        } > "$tmp"
+        mv "$tmp" "$note_path"
+    else
+        # No subsequent heading — append to end of file
+        printf '\n%s\n' "$line" >> "$note_path"
+    fi
 }
 
 # --- Main processing ---------------------------------------------------------
@@ -272,17 +309,24 @@ process_new_memos() {
             continue
         fi
 
-        # Get the date this was recorded and find/create the daily note
+        # Get the date this was recorded and find the weekly note
         local rec_date
         rec_date=$(recording_date "$datetime")
         local rec_time="${datetime##* }"  # just the HH:MM:SS part
 
         local note_path
-        note_path=$(ensure_daily_note "$rec_date")
+        note_path=$(resolve_weekly_note "$rec_date")
 
-        # Append to daily note
+        if [[ -z "$note_path" ]]; then
+            log "Skipping $filename — no weekly note for $rec_date"
+            continue
+        fi
+
+        # Append to weekly note under ## Notes & Captures
+        local week_name
+        week_name=$(recording_week "$rec_date")
         append_transcript "$note_path" "$rec_time" "$(format_duration "$duration")" "$transcript"
-        log "Appended to $rec_date.md"
+        log "Appended to ${week_name}.md"
 
         # Mark as processed
         mark_processed "$filename"

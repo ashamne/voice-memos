@@ -4,9 +4,10 @@
 
 # --- Required ----------------------------------------------------------------
 
-# Directory where transcripts are saved. One file per day: YYYY-MM-DD.md
-# Example: your Obsidian daily notes folder, a Logseq journal, or any directory.
-OUTPUT_DIR="$HOME/Notes"
+# Directory containing weekly notes. The script looks for files named
+# W{nn}-{YYYY}.md (e.g. W15-2026.md) and appends transcripts under the
+# "## Notes & Captures" section. Notes must already exist.
+OUTPUT_DIR="$HOME/Brain/Calendar/Weekly"
 
 # --- Optional ----------------------------------------------------------------
 
