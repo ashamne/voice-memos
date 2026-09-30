@@ -20,7 +20,7 @@ set -euo pipefail
 MEMOS_DIR="$HOME/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings"
 
 # Defaults (overridden by config file)
-OUTPUT_DIR="$HOME/Brain/Calendar/Weekly"
+OUTPUT_DIR="$HOME/Brain/Plans"   # base; weekly notes live at Plans/{year}/weeks/
 OUTPUT_TAG="#voice-memo"
 OUTPUT_TIMESTAMP=true
 OUTPUT_DURATION=true
@@ -186,19 +186,37 @@ recording_date() {
 # Compute the weekly note filename (e.g. W15-2026) from a YYYY-MM-DD date
 recording_week() {
     local ymd="$1"
-    date -jf '%Y-%m-%d' "$ymd" '+W%V-%G'
+    # obsidian-weekly uses SUNDAY-start weeks; date's %V is ISO (Monday-start).
+    # They agree Mon-Sat and differ only on Sunday, so shifting a Sunday forward
+    # one day lands it in the ISO week that matches the note's numbering.
+    # Verified: 2026-08-09 (Sun) -> 2026-W33, whose note covers Aug 9 - Aug 15.
+    local dow
+    dow=$(date -jf '%Y-%m-%d' "$ymd" '+%u')
+    local d="$ymd"
+    if [[ "$dow" == "7" ]]; then
+        d=$(date -jf '%Y-%m-%d' -v+1d "$ymd" '+%Y-%m-%d')
+    fi
+    date -jf '%Y-%m-%d' "$d" '+%G-W%V'
 }
 
-# Resolve the weekly note path for a given date. The note must already exist
-# (created by Obsidian); returns empty string and logs a warning if missing.
+# Resolve the weekly note path for a given date.
+#
+# This does NOT create the note. obsidian-weekly owns weekly-note creation --
+# its format is a template setting plus frontmatter generated in note-manager.ts,
+# and duplicating that here guarantees drift (see 2026-08-24: this script had been
+# writing to Brain/Calendar/Weekly for four months after that folder was dissolved).
+# Notes for the rest of 2026 are pre-created; the plugin makes any others on demand.
+#
+# If the note is genuinely missing, skip: the caller `continue`s BEFORE
+# mark_processed, so the memo stays unprocessed and lands on a later run.
 resolve_weekly_note() {
     local ymd="$1"
     local week_name
     week_name=$(recording_week "$ymd")
-    local note_path="$OUTPUT_DIR/${week_name}.md"
+    local note_path="$OUTPUT_DIR/${week_name%%-*}/weeks/${week_name}.md"
 
     if [[ ! -f "$note_path" ]]; then
-        log "WARNING: Weekly note not found: $note_path"
+        log "WARNING: Weekly note not found: $note_path (will retry next run)"
         echo ""
         return 1
     fi
@@ -227,7 +245,9 @@ append_transcript() {
 
     # Find the "## Notes & Captures" section and insert before the next ## heading
     local section_line next_heading_line total_lines
-    section_line=$(grep -n '^## Notes & Captures' "$note_path" | head -1 | cut -d: -f1)
+    # `|| true`: under `set -euo pipefail` a no-match grep returns 1 and would
+    # abort the whole run before the fallback below could handle it.
+    section_line=$(grep -n '^## Notes & Captures' "$note_path" | head -1 | cut -d: -f1 || true)
 
     if [[ -z "$section_line" ]]; then
         log "WARNING: '## Notes & Captures' not found in $note_path — appending to end"
@@ -238,8 +258,11 @@ append_transcript() {
     total_lines=$(wc -l < "$note_path")
 
     # Find the next ## heading after the section header
+    # `|| true` for the same reason: "## Notes & Captures" is the LAST heading in
+    # a fresh weekly note, so this grep normally matches nothing. Without it the
+    # append-to-end branch below was unreachable and every memo died here.
     next_heading_line=$(tail -n +"$((section_line + 1))" "$note_path" \
-        | grep -n '^## ' | head -1 | cut -d: -f1)
+        | grep -n '^## ' | head -1 | cut -d: -f1 || true)
 
     if [[ -n "$next_heading_line" ]]; then
         # Convert relative line number to absolute
