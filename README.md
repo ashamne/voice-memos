@@ -7,7 +7,7 @@ Auto-transcribe Apple Voice Memos and save to your notes. Records on iPhone, App
 1. You record a voice memo on any Apple device
 2. iCloud syncs it to your Mac (usually within 30-120 seconds)
 3. A LaunchAgent detects the new file and runs the transcription script
-4. The script converts the audio to WAV, transcribes it with [whisper.cpp](https://github.com/ggerganov/whisper.cpp), and appends the text to the current weekly note under `## Notes & Captures`
+4. The script converts the audio to WAV, transcribes it with [whisper.cpp](https://github.com/ggerganov/whisper.cpp), and appends the text to the end of the current weekly note, between `---` lines
 
 Each transcript is a single line inserted into your weekly note (e.g. `W15-2026.md`):
 

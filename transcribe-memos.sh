@@ -3,8 +3,8 @@
 # voice-memos — Auto-transcribe Apple Voice Memos
 #
 # Watches for new Voice Memos (recorded on iPhone, Apple Watch, or Mac),
-# transcribes them locally using whisper.cpp, and appends the text to
-# the current weekly note under "## Notes & Captures".
+# transcribes them locally using whisper.cpp, and appends the text to the
+# end of the current weekly note, between `---` lines.
 #
 # Usage:
 #   ./transcribe-memos.sh           # Process new memos once and exit
@@ -224,8 +224,9 @@ resolve_weekly_note() {
     echo "$note_path"
 }
 
-# Append a transcript under "## Notes & Captures" in the weekly note.
-# Inserts before the next ## heading so other sections aren't displaced.
+# Append a transcript to the end of the weekly note, with a `---` line above
+# and below it. No `---` is added above when the note already ends with one,
+# so consecutive memos share a single separator.
 append_transcript() {
     local note_path="$1"
     local time="$2"
@@ -243,42 +244,22 @@ append_transcript() {
     [[ "$OUTPUT_DURATION" == "true" ]] && line="${line}${duration} / "
     line="${line}${oneline}"
 
-    # Find the "## Notes & Captures" section and insert before the next ## heading
-    local section_line next_heading_line total_lines
-    # `|| true`: under `set -euo pipefail` a no-match grep returns 1 and would
-    # abort the whole run before the fallback below could handle it.
-    section_line=$(grep -n '^## Notes & Captures' "$note_path" | head -1 | cut -d: -f1 || true)
+    # Last non-blank line of the note. `|| true`: under `set -euo pipefail` a
+    # no-match grep returns 1 and would abort the run.
+    local last_line
+    last_line=$(grep -v '^[[:space:]]*$' "$note_path" | tail -n 1 || true)
 
-    if [[ -z "$section_line" ]]; then
-        log "WARNING: '## Notes & Captures' not found in $note_path — appending to end"
-        printf '\n%s\n' "$line" >> "$note_path"
-        return
-    fi
-
-    total_lines=$(wc -l < "$note_path")
-
-    # Find the next ## heading after the section header
-    # `|| true` for the same reason: "## Notes & Captures" is the LAST heading in
-    # a fresh weekly note, so this grep normally matches nothing. Without it the
-    # append-to-end branch below was unreachable and every memo died here.
-    next_heading_line=$(tail -n +"$((section_line + 1))" "$note_path" \
-        | grep -n '^## ' | head -1 | cut -d: -f1 || true)
-
-    if [[ -n "$next_heading_line" ]]; then
-        # Convert relative line number to absolute
-        local insert_at=$(( section_line + next_heading_line ))
-        # Split file and reassemble with the new line inserted
-        # (safer than sed -i with arbitrary transcript text)
-        local tmp="$TMP_DIR/_weekly_note_insert.md"
-        { head -n "$((insert_at - 1))" "$note_path"
-          printf '%s\n\n' "$line"
-          tail -n +"$insert_at" "$note_path"
-        } > "$tmp"
-        mv "$tmp" "$note_path"
-    else
-        # No subsequent heading — append to end of file
-        printf '\n%s\n' "$line" >> "$note_path"
-    fi
+    {
+        # Finish an unterminated last line, so the `---` below cannot turn the
+        # text above it into a heading.
+        if [[ -s "$note_path" && -n "$(tail -c 1 "$note_path")" ]]; then
+            printf '\n'
+        fi
+        if [[ "$last_line" != "---" ]]; then
+            printf '\n---\n'
+        fi
+        printf '\n%s\n\n---\n' "$line"
+    } >> "$note_path"
 }
 
 # --- Main processing ---------------------------------------------------------
@@ -345,7 +326,7 @@ process_new_memos() {
             continue
         fi
 
-        # Append to weekly note under ## Notes & Captures
+        # Append to the end of the weekly note
         local week_name
         week_name=$(recording_week "$rec_date")
         append_transcript "$note_path" "$rec_time" "$(format_duration "$duration")" "$transcript"
